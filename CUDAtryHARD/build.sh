@@ -1,0 +1,1 @@
+nvcc -O3 nbody_gl.cu -I"../inc" -I"../glfw-3.3/include" -I"/usr/include" -L"../Asztal/glew-2.1.0/" -L"../glfw-3.3/build/src/" -o gl.out -lglfw3 -lGLEW -lGL -lX11
