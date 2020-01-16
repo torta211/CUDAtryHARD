@@ -61,147 +61,110 @@ std::vector<color> cpu_create_integral(std::vector<color>& orig_image, int w, in
     return integral_image;
 }
 
-__global__ void gpu_blur_integral(float4* render_out, float4* integral_in, int W, int H)
+// will not use CUDA textures this time (It could be interesting to expreiment with that too)
+__global__ void gpu_blur_integral(float4* render_out, float4* integral_in, float* depth_in, int W, int H, float sharp_dist)
 {
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    // radius of kernal will be = 3 pixels, this is just a try
+    int kernel_radius = 10 * abs(depth_in[y * W + x] - sharp_dist) + 1;
+
     // corner1, corner2
     // corner3, corner4
-    int corner1_x = x - 3 > 0 ? x - 3 : 0;
-    int corner1_y = y - 3 > 0 ? y - 3 : 0;
+    int corner1_x = x - kernel_radius > 0 ? x - kernel_radius : 0;
+    int corner1_y = y - kernel_radius > 0 ? y - kernel_radius : 0;
     float4 corner1 = integral_in[corner1_y * W + corner1_x];
 
-    int corner2_x = x + 3 < W ? x + 3 : W - 1;
-    int corner2_y = y - 3 > 0 ? y - 3 : 0;
+    int corner2_x = x + kernel_radius - 1 < W ? x + kernel_radius - 1 : W - 1;
+    int corner2_y = y - kernel_radius > 0 ? y - kernel_radius : 0;
     float4 corner2 = integral_in[corner2_y * W + corner2_x];
 
-    int corner3_x = x - 3 > 0 ? x - 3 : 0;
-    int corner3_y = y + 3 < H ? y + 3 : H - 1;
+    int corner3_x = x - kernel_radius > 0 ? x - kernel_radius : 0;
+    int corner3_y = y + kernel_radius - 1 < H ? y + kernel_radius - 1 : H - 1;
     float4 corner3 = integral_in[corner3_y * W + corner3_x];
 
-    int corner4_x = x + 3 < W ? x + 3 : W - 1;
-    int corner4_y = y + 3 < H ? y + 3 : H - 1;
+    int corner4_x = x + kernel_radius - 1 < W ? x + kernel_radius - 1: W - 1;
+    int corner4_y = y + kernel_radius - 1 < H ? y + kernel_radius - 1: H - 1;
     float4 corner4 = integral_in[corner4_y * W + corner4_x];
 
     float blurred_val_r = corner4.x - corner3.x - corner2.x + corner1.x;
     float blurred_val_g = corner4.y - corner3.y - corner2.y + corner1.y;
     float blurred_val_b = corner4.z - corner3.z - corner2.z + corner1.z;
     float blurred_val_a = corner4.w - corner3.w - corner2.w + corner1.w;
-    blurred_val_r /= (corner2_x - corner1_x + 1) * (corner3_y - corner1_y + 1);
-    blurred_val_g /= (corner2_x - corner1_x + 1) * (corner3_y - corner1_y + 1);
-    blurred_val_b /= (corner2_x - corner1_x + 1) * (corner3_y - corner1_y + 1);
-    blurred_val_a /= (corner2_x - corner1_x + 1) * (corner3_y - corner1_y + 1);
+    blurred_val_r /= (corner2_x - corner1_x) * (corner3_y - corner1_y);
+    blurred_val_g /= (corner2_x - corner1_x) * (corner3_y - corner1_y);
+    blurred_val_b /= (corner2_x - corner1_x) * (corner3_y - corner1_y);
+    blurred_val_a /= (corner2_x - corner1_x) * (corner3_y - corner1_y);
 
     render_out[y * W + x] = float4{ blurred_val_r, blurred_val_g, blurred_val_b, blurred_val_a};
 }
 
-__global__ void gpu_rotate_buffer(float4* output, float4* input, int W, int H, float angle)
-{
-    unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-    float u = x - W / 2.0f;
-    float v = y - H / 2.0f;
-
-    float u0 = u * std::cos(angle) - v * std::sin(angle) + W / 2.0f;
-    float v0 = v * std::cos(angle) + u * std::sin(angle) + H / 2.0f;
-
-    int ui0 = (int)u0;
-    int ui1 = (int)u0 + 1;
-    int vi0 = (int)v0;
-    int vi1 = (int)v0 + 1;
-
-    float4 c0 = (ui0 >= 0 && vi0 >= 0 && vi0 < H && ui0 < W) ? input[vi0 * W + ui0] : float4{ 0, 0, 0, 0 };
-    float4 c1 = (ui0 >= 0 && vi1 >= 0 && vi1 < H && ui0 < W) ? input[vi1 * W + ui0] : float4{ 0, 0, 0, 0 };
-    float4 c2 = (ui1 >= 0 && vi0 >= 0 && vi0 < H && ui1 < W) ? input[vi0 * W + ui1] : float4{ 0, 0, 0, 0 };
-    float4 c3 = (ui1 >= 0 && vi1 >= 0 && vi1 < H && ui1 < W) ? input[vi1 * W + ui1] : float4{ 0, 0, 0, 0 };
-
-    //bilinear interpolation:
-    float ufrac = ui0 + 1 - u0;
-    float vfrac = vi0 + 1 - v0;
-
-    float Ar = c0.x * ufrac + c2.x * (1 - ufrac);
-    float Ag = c0.y * ufrac + c2.y * (1 - ufrac);
-    float Ab = c0.z * ufrac + c2.z * (1 - ufrac);
-    float Aa = c0.w * ufrac + c2.w * (1 - ufrac);
-
-    float Br = c1.x * ufrac + c3.x * (1 - ufrac);
-    float Bg = c1.y * ufrac + c3.y * (1 - ufrac);
-    float Bb = c1.z * ufrac + c3.z * (1 - ufrac);
-    float Ba = c1.w * ufrac + c3.w * (1 - ufrac);
-
-    float Cr = Ar * vfrac + Br * (1 - vfrac);
-    float Cg = Ag * vfrac + Bg * (1 - vfrac);
-    float Cb = Ab * vfrac + Bb * (1 - vfrac);
-    float Ca = Aa * vfrac + Ba * (1 - vfrac);
-
-    Cr = Cr < 0 ? 0 : Cr;
-    Cg = Cg < 0 ? 0 : Cg;
-    Cb = Cb < 0 ? 0 : Cb;
-    Ca = Ca < 0 ? 0 : Ca;
-
-    output[y * W + x] = float4{ Cr, Cg, Cb, Ca };
-}
-
-__global__ void gpu_rotate_texture(float4* output, cudaTextureObject_t input, int W, int H, float angle)
-{
-    unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-    float u = x - W / 2.0f;
-    float v = y - H / 2.0f;
-
-    float u0 = u * std::cos(angle) - v * std::sin(angle) + W / 2.0f + 0.5f;
-    float v0 = v * std::cos(angle) + u * std::sin(angle) + H / 2.0f + 0.5f;
-
-    // Read from texture and write to global memory
-    output[y * W + x] = tex2D<float4>(input, u0, v0);
-}
-
 int main()
 {
-    static const std::string input_filename = "3dindoorrender.png";
+    static const std::string input_image_filename = "church.png";
+    static const std::string input__depth_filename = "church_depth.png";
     static const std::string output_filename1 = "gpu_out1.jpg";
     static const std::string output_filename2 = "gpu_out2.jpg";
 
     static const int block_size = 32;
 
-    std::cout << "Enter rotation angle in degrees:\n";
-    float angle = 0.5f;
-    std::cin >> angle;
-    angle *= 3.1415926535f / 180.0f;
-
     int w = 0;//width
     int h = 0;//height
     int ch = 0;//number of components
     
-    rawcolor* data0 = reinterpret_cast<rawcolor*>(stbi_load(input_filename.c_str(), &w, &h, &ch, 4 /* we expect 4 components */));
+    rawcolor* data0 = reinterpret_cast<rawcolor*>(stbi_load(input_image_filename.c_str(), &w, &h, &ch, 4 /* we expect 4 channels */));
     if (!data0)
     {
-        std::cout << "Error: could not open input file: " << input_filename << "\n";
+        std::cout << "Error: could not open input file: " << input_image_filename << "\n";
         return -1;
     }
     else
     {
-        std::cout << "Image (" << input_filename << ") opened successfully. Width x Height x Components = " << w << " x " << h << " x " << ch << "\n";
+        std::cout << "Image (" << input_image_filename << ") opened successfully. Width x Height x Components = " << w << " x " << h << " x " << ch << "\n";
+    }
+
+    int w_d = 0;//width
+    int h_d = 0;//height
+    int ch_d = 0;//number of components
+
+    unsigned char* data1 = reinterpret_cast<unsigned char*>(stbi_load(input__depth_filename.c_str(), &w_d, &h_d, &ch_d, 1 /* we expect 1 channel */));
+    if (!data1)
+    {
+        std::cout << "Error: could not open input file: " << input__depth_filename << "\n";
+        return -1;
+    }
+    else if (w != w_d || h != h_d)
+    {
+        std::cout << "Error: color and depth image size mismatch\n";
+        return -1;
+    }
+    else
+    {
+        std::cout << "Image (" << input__depth_filename << ") opened successfully. Width x Height x Components = " << w_d << " x " << h_d << " x " << ch_d << "\n";
     }
 
     std::vector<color> input(w * h);
-    std::vector<color> output1(w * h);
-    std::vector<color> output2(w * h);
+    std::vector<float> input_depth(w * h);
+    std::vector<color> output(w * h);
 
     std::transform(data0, data0 + w * h, input.begin(), [](rawcolor c) { return color{ c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f }; });
     stbi_image_free(data0);
 
+    std::transform(data1, data1 + w * h, input_depth.begin(), [](unsigned char c) { return c / 255.0f; });
+    stbi_image_free(data1);
+
     std::vector<color> input_integral = cpu_create_integral(input, w, h);
+
+    std::cout << "Enter the focus distance (scaled to 0 - 1):\n";
+    float focus_distance = 0.0f;
+    std::cin >> focus_distance;
 
     //GPU version using buffers:
     float dt = 0.0f;//milliseconds
     {
         float4* pInput = nullptr;
         float4* pOutput = nullptr;
+        float* pDepth = nullptr;
 
         cudaEvent_t evt[2];
         for (auto& e : evt) { cudaEventCreate(&e); }
@@ -213,23 +176,32 @@ int main()
         err = cudaMalloc((void**)&pOutput, w * h * sizeof(color));
         if (err != cudaSuccess) { std::cout << "Error allocating CUDA memory: " << cudaGetErrorString(err) << "\n"; return -1; }
 
+        err = cudaMalloc((void**)&pDepth, w * h * sizeof(float));
+        if (err != cudaSuccess) { std::cout << "Error allocating CUDA memory: " << cudaGetErrorString(err) << "\n"; return -1; }
+
         err = cudaMemcpy(pInput, input_integral.data(), w * h * sizeof(color), cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) { std::cout << "Error copying memory to device: " << cudaGetErrorString(err) << "\n"; return -1; }
+
+        err = cudaMemcpy(pDepth, input_depth.data(), w * h * sizeof(float), cudaMemcpyHostToDevice);
         if (err != cudaSuccess) { std::cout << "Error copying memory to device: " << cudaGetErrorString(err) << "\n"; return -1; }
 
         {
             dim3 dimGrid(w / block_size, h / block_size);
             dim3 dimBlock(block_size, block_size);
             cudaEventRecord(evt[0]);
-            gpu_blur_integral << <dimGrid, dimBlock >> > (pOutput, pInput, w, h);
+            gpu_blur_integral << <dimGrid, dimBlock >> > (pOutput, pInput, pDepth, w, h, focus_distance);
             err = cudaGetLastError();
             if (err != cudaSuccess) { std::cout << "CUDA error in kernel call: " << cudaGetErrorString(err) << "\n"; return -1; }
             cudaEventRecord(evt[1]);
         }
 
-        err = cudaMemcpy(output1.data(), pOutput, w * h * sizeof(color), cudaMemcpyDeviceToHost);
+        err = cudaMemcpy(output.data(), pOutput, w * h * sizeof(color), cudaMemcpyDeviceToHost);
         if (err != cudaSuccess) { std::cout << "Error copying memory to host: " << cudaGetErrorString(err) << "\n"; return -1; }
 
         err = cudaFree(pInput);
+        if (err != cudaSuccess) { std::cout << "Error freeing allocation: " << cudaGetErrorString(err) << "\n"; return -1; }
+
+        err = cudaFree(pDepth);
         if (err != cudaSuccess) { std::cout << "Error freeing allocation: " << cudaGetErrorString(err) << "\n"; return -1; }
 
         err = cudaFree(pOutput);
@@ -241,81 +213,7 @@ int main()
         for (auto& e : evt) { cudaEventDestroy(e); }
     }
 
-    float dt2 = 0.0f;//milliseconds
-    {
-        cudaError_t err = cudaSuccess;
-
-        cudaEvent_t evt[2];
-        for (auto& e : evt) { cudaEventCreate(&e); }
-
-        //Channel layout of data:
-        cudaChannelFormatDesc channelDescInput = cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
-
-        //Allocate data:
-        cudaArray* aInput;
-
-        err = cudaMallocArray(&aInput, &channelDescInput, w, h);
-        if (err != cudaSuccess) { std::cout << "Error allocating CUDA memory: " << cudaGetErrorString(err) << "\n"; return -1; }
-
-        //Upload data to device:
-        err = cudaMemcpyToArray(aInput, 0, 0, input.data(), w * h * sizeof(color), cudaMemcpyHostToDevice);
-        if (err != cudaSuccess) { std::cout << "Error copying memory to device: " << cudaGetErrorString(err) << "\n"; return -1; }
-
-        //Specify texture resource description:
-        cudaResourceDesc resdescInput{};
-        resdescInput.resType = cudaResourceTypeArray;
-        resdescInput.res.array.array = aInput;
-
-        //Specify texture description:
-        cudaTextureDesc texDesc{};
-        texDesc.addressMode[0] = cudaAddressModeBorder;
-        texDesc.addressMode[1] = cudaAddressModeBorder;
-        texDesc.filterMode = cudaFilterModeLinear;
-        texDesc.readMode = cudaReadModeElementType;
-        texDesc.normalizedCoords = 0;
-
-        // Create texture object
-        cudaTextureObject_t texObjInput = 0;
-        err = cudaCreateTextureObject(&texObjInput, &resdescInput, &texDesc, nullptr);
-        if (err != cudaSuccess) { std::cout << "Error creating texture object: " << cudaGetErrorString(err) << "\n"; return -1; }
-
-        //The output is just an usual buffer:
-        float4* pOutput = nullptr;
-        err = cudaMalloc((void**)&pOutput, w * h * sizeof(color));
-        if (err != cudaSuccess) { std::cout << "Error allocating CUDA memory: " << cudaGetErrorString(err) << "\n"; return -1; }
-
-        // Invoke kernel
-        {
-            dim3 dimGrid(w / block_size, h / block_size);
-            dim3 dimBlock(block_size, block_size);
-            cudaEventRecord(evt[0]);
-            gpu_rotate_texture << <dimGrid, dimBlock >> > (pOutput, texObjInput, w, h, angle);
-            err = cudaGetLastError();
-            if (err != cudaSuccess) { std::cout << "CUDA error in kernel call: " << cudaGetErrorString(err) << "\n"; return -1; }
-            cudaEventRecord(evt[1]);
-        }
-
-        err = cudaMemcpy(output2.data(), pOutput, w * h * sizeof(color), cudaMemcpyDeviceToHost);
-        if (err != cudaSuccess) { std::cout << "Error copying memory to host: " << cudaGetErrorString(err) << "\n"; return -1; }
-
-        //Cleanup:
-        err = cudaDestroyTextureObject(texObjInput);
-        if (err != cudaSuccess) { std::cout << "Error destroying texture object: " << cudaGetErrorString(err) << "\n"; return -1; }
-
-        err = cudaFreeArray(aInput);
-        if (err != cudaSuccess) { std::cout << "Error freeing array allocation: " << cudaGetErrorString(err) << "\n"; return -1; }
-
-        err = cudaFree(pOutput);
-        if (err != cudaSuccess) { std::cout << "Error freeing allocation: " << cudaGetErrorString(err) << "\n"; return -1; }
-
-        cudaEventSynchronize(evt[1]);
-        cudaEventElapsedTime(&dt2, evt[0], evt[1]);
-
-        for (auto& e : evt) { cudaEventDestroy(e); }
-    }
-
     std::cout << "GPU Computation 1 took: " << dt << " ms\n";
-    std::cout << "GPU Computation 2 took: " << dt2 << " ms\n";
 
     auto convert_and_write = [w, h, ch](std::string const& filename, std::vector<color> const& data)
     {
@@ -334,8 +232,7 @@ int main()
         else { std::cout << "Output written to file " << filename << "\n"; }
     };
 
-    convert_and_write(output_filename1, output1);
-    convert_and_write(output_filename2, output2);
+    convert_and_write(output_filename1, output);
 
     return 0;
 }

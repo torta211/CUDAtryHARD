@@ -163,6 +163,10 @@
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="stb_image_write.h" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="church.png" />
+    <Image Include="church_depth.png" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 10.2.targets" />
