@@ -12,6 +12,9 @@
 #include <GL/glext.h>
 #endif
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 #include "device_launch_parameters.h"
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
@@ -159,6 +162,18 @@ int main(void)
 		particles[i + 7] = Particle{ -5.0f + i / 8 * dx,  5.25f, -0.2f + i / 8 * dz, 10000.0f };
 	}
 
+	// quad vertices for screen
+	float quadVerticesArray[] = {
+		-1.0f,  1.0f, 0.0f, 1.0f,
+		-1.0f, -1.0f, 0.0f, 0.0f,
+		 1.0f, -1.0f, 1.0f, 0.0f,
+
+		-1.0f,  1.0f, 0.0f, 1.0f,
+		 1.0f, -1.0f, 1.0f, 0.0f,
+		 1.0f,  1.0f, 1.0f, 1.0f
+	};
+	std::vector<float> quadVertices(quadVerticesArray, quadVerticesArray + sizeof(quadVerticesArray) / sizeof(float));
+
 	//Compile shaders:
 	auto load_and_compile_shader = [](auto shader_type, std::string const& path)->GLuint
 	{
@@ -221,14 +236,75 @@ int main(void)
 			glDeleteProgram(glProgram);
 		}
 		else { std::cout << "Shaders linked successfully\n"; }
-
-		glUseProgram(glProgram);
 		if (!checkGLError()) { return -1; }
 	}
 
-	//Create buffers:
+	GLuint vertexTextureShaderObj = load_and_compile_shader(GL_VERTEX_SHADER, "textureVertexShader.glsl");
+	GLuint fragmentTextureShaderObj = load_and_compile_shader(GL_FRAGMENT_SHADER, "textureFragmentShader.glsl");
+	if (!vertexTextureShaderObj && !fragmentTextureShaderObj) { std::cout << "Failed to load and compile shaders\n"; return -1; }
+
+	GLuint textureShaderProgram = glCreateProgram();
+	{
+		glAttachShader(textureShaderProgram, vertexTextureShaderObj);
+		glAttachShader(textureShaderProgram, fragmentTextureShaderObj);
+		glLinkProgram(textureShaderProgram);
+
+		GLint gl_status = 0;
+		glGetProgramiv(textureShaderProgram, GL_LINK_STATUS, &gl_status);
+		if (!gl_status)
+		{
+			char temp[256];
+			glGetProgramInfoLog(textureShaderProgram, 256, 0, temp);
+			std::cout << "Failed to link program: " << temp << std::endl;
+			glDeleteProgram(textureShaderProgram);
+		}
+		else { std::cout << "Shaders linked successfully\n"; }
+
+		if (!checkGLError()) { return -1; }
+	}
+
+	//Create buffers (quad for texture):
+	GLuint quadvbo;
+	GLuint quadvao;
+
+	//Create buffer ID
+	glGenBuffers(1, &quadvbo);
+	if (!checkGLError("glGenBuffers")) { return -1; }
+
+	// Select the GL Buffer as the active one: 
+	glBindBuffer(GL_ARRAY_BUFFER, quadvbo);
+	if (!checkGLError("glBindBuffer")) { return -1; }
+
+	// Allocate memory for the buffer:
+	glBufferData(GL_ARRAY_BUFFER, quadVertices.size() * sizeof(float), NULL, GL_STATIC_DRAW);
+	if (!checkGLError("glBufferData")) { return -1; }
+
+	// Upload data to the buffer:
+	glBufferSubData(GL_ARRAY_BUFFER, 0, quadVertices.size() * sizeof(float), quadVertices.data());
+	if (!checkGLError("glBufferSubData")) { return -1; }
+
+	// Create and activate the Vertex Array Object
+	// these API functions are missing on windows from the CUDA SDK glew, so we load them manually:
+	typedef void (*Fnt_GenVertexArrays) (GLsizei n, GLuint* arrays);
+	typedef void (*Fnt_BindVertexArray) (GLuint array);
+	Fnt_GenVertexArrays pglGenVertexArrays = load_extension_pointer<Fnt_GenVertexArrays>("glGenVertexArrays");
+	Fnt_BindVertexArray pglBindVertexArray = load_extension_pointer<Fnt_BindVertexArray>("glBindVertexArray");
+
+	pglGenVertexArrays(1, &quadvao); if (!checkGLError("glGenVertexArrays")) { return -1; }
+	pglBindVertexArray(quadvao);	   if (!checkGLError("glBindVertexArray")) { return -1; }
+
+	// Register buffers into the VAO
+	glBindBuffer(GL_ARRAY_BUFFER, quadvbo);
+	if (!checkGLError("glBindBuffer(geo)")) { return -1; }
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+	if (!checkGLError("glVertexAttribPointer(geo)")) { return -1; }
+
+	glEnableVertexAttribArray(0);
+	if (!checkGLError("glEnableVertexAttribArray(0)")) { return -1; }
+
+	//Create buffers (for particle data):
 	GLuint glbuffer;
-	cudaGraphicsResource* cuda_glbuffer = nullptr;
 	GLuint glvao;
 
 	//Create buffer ID
@@ -247,13 +323,6 @@ int main(void)
 	glBufferSubData(GL_ARRAY_BUFFER, 0, particles.size() * sizeof(Particle), particles.data());
 	if (!checkGLError("glBufferSubData")) { return -1; }
 
-	// Create and activate the Vertex Array Object
-	// these API functions are missing on windows from the CUDA SDK glew, so we load them manually:
-	typedef void (*Fnt_GenVertexArrays) (GLsizei n, GLuint* arrays);
-	typedef void (*Fnt_BindVertexArray) (GLuint array);
-	Fnt_GenVertexArrays pglGenVertexArrays = load_extension_pointer<Fnt_GenVertexArrays>("glGenVertexArrays");
-	Fnt_BindVertexArray pglBindVertexArray = load_extension_pointer<Fnt_BindVertexArray>("glBindVertexArray");
-
 	pglGenVertexArrays(1, &glvao); if (!checkGLError("glGenVertexArrays")) { return -1; }
 	pglBindVertexArray(glvao);	   if (!checkGLError("glBindVertexArray")) { return -1; }
 
@@ -266,15 +335,51 @@ int main(void)
 	glEnableVertexAttribArray(0);
 	if (!checkGLError("glEnableVertexAttribArray(0)")) { return -1; }
 
+	// create framebuffer
+	unsigned int fbo;
+	glGenFramebuffers(1, &fbo);
+
+	// create a color attachment texture
+	unsigned int textureColorbuffer;
+	glGenTextures(1, &textureColorbuffer);
+	glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	// create a renderbuffer object for depth and stancil attachment, because for now, we won't sample these
+	unsigned int rbo;
+	glGenRenderbuffers(1, &rbo);
+	glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+
+	// attach the texture and renderbuffer
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo); // write operations
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureColorbuffer, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
+
+	// verify if the framebuffer is complete
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE)
+	{
+		std::cout << "Framebuffer complete\n";
+	}
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
+	int w, h, nrChannels;
+	unsigned char* data = stbi_load("map.png", &w, &h, &nrChannels, 0);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	stbi_image_free(data);
 	std::cout << "Entering render loop\n";
 	while (!glfwWindowShouldClose(window))
 	{
 		glClearColor(0, 0, 0, 1);
 		glClear(GL_COLOR_BUFFER_BIT);
-		glClear(GL_DEPTH_BUFFER_BIT);
 
-		pglBindVertexArray(glvao);
-		glDrawArrays(GL_POINTS, 0, N);
+		glUseProgram(textureShaderProgram);
+		pglBindVertexArray(quadvao);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
