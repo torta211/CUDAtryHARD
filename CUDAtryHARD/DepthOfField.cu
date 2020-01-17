@@ -118,6 +118,8 @@ int main(void)
 		std::cout << "glewInit failed: " << glewGetErrorString(err);
 		return -1;
 	}
+	glEnable(GL_PROGRAM_POINT_SIZE);
+	glEnable(GL_DEPTH_TEST);
 
 	glViewport(0, 0, width, height);
 	glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
@@ -208,7 +210,6 @@ int main(void)
 		glAttachShader(glProgram, vertexShaderObj);
 		glAttachShader(glProgram, fragmentShaderObj);
 		glLinkProgram(glProgram);
-		glEnable(GL_PROGRAM_POINT_SIZE);
 
 		GLint gl_status = 0;
 		glGetProgramiv(glProgram, GL_LINK_STATUS, &gl_status);
@@ -270,6 +271,7 @@ int main(void)
 	{
 		glClearColor(0, 0, 0, 1);
 		glClear(GL_COLOR_BUFFER_BIT);
+		glClear(GL_DEPTH_BUFFER_BIT);
 
 		pglBindVertexArray(glvao);
 		glDrawArrays(GL_POINTS, 0, N);
