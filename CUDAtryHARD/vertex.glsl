@@ -15,12 +15,8 @@ out block
 
 void main()
 {
-	gl_Position = vec4(Pin.xy/20.0f, 0.5f, 1.0f);
+	gl_PointSize = 10.0f;
+	gl_Position = vec4(Pin.x/(1.5f + Pin.z)/5.0f, Pin.y/(1.5f + Pin.z)/5.0f, Pin.z, 1.0f);
 	VS_Out.Position = gl_Position;
-	float div = Pin.z > 0.05 ? Pin.z : 1.0f;
-	VS_Out.Color = vec3(0.1f/div, 0.1f/div, 0.1f/div);
-	if( Pin.w > 100.0f )
-	{
-		VS_Out.Color = vec3(1.0f, 0.0f, 0.0f);
-	}
+	VS_Out.Color = vec3(0.3f + (1.0f + Pin.z) / 3.0f, 0.45f, 0.65f);
 }
