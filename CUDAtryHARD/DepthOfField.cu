@@ -144,36 +144,6 @@ int main(void)
 		std::cout << "GLEW: Glew version: " << glewGetString(GLEW_VERSION) << "\n";
 	}
 
-	//Generate vertices
-	const int N = 224;
-
-	std::vector<Particle> particles(N);
-	float dx = 0.5f;
-	float dz = 0.04f;
-	for (int i = 0; i < N; i += 8)
-	{
-		particles[i    ] = Particle{ -5.0f + i / 8 * dx, -5.25f, -0.2f + i / 8 * dz, 10000.0f };
-		particles[i + 1] = Particle{ -5.0f + i / 8 * dx, -3.75f, -0.2f + i / 8 * dz, 10000.0f };
-		particles[i + 2] = Particle{ -5.0f + i / 8 * dx, -2.25f, -0.2f + i / 8 * dz, 10000.0f };
-		particles[i + 3] = Particle{ -5.0f + i / 8 * dx, -0.75f, -0.2f + i / 8 * dz, 10000.0f };
-		particles[i + 4] = Particle{ -5.0f + i / 8 * dx,  0.75f, -0.2f + i / 8 * dz, 10000.0f };
-		particles[i + 5] = Particle{ -5.0f + i / 8 * dx,  2.25f, -0.2f + i / 8 * dz, 10000.0f };
-		particles[i + 6] = Particle{ -5.0f + i / 8 * dx,  3.75f, -0.2f + i / 8 * dz, 10000.0f };
-		particles[i + 7] = Particle{ -5.0f + i / 8 * dx,  5.25f, -0.2f + i / 8 * dz, 10000.0f };
-	}
-
-	// quad vertices for screen
-	float quadVerticesArray[] = {
-		-1.0f,  1.0f, 0.0f, 1.0f,
-		-1.0f, -1.0f, 0.0f, 0.0f,
-		 1.0f, -1.0f, 1.0f, 0.0f,
-
-		-1.0f,  1.0f, 0.0f, 1.0f,
-		 1.0f, -1.0f, 1.0f, 0.0f,
-		 1.0f,  1.0f, 1.0f, 1.0f
-	};
-	std::vector<float> quadVertices(quadVerticesArray, quadVerticesArray + sizeof(quadVerticesArray) / sizeof(float));
-
 	//Compile shaders:
 	auto load_and_compile_shader = [](auto shader_type, std::string const& path)->GLuint
 	{
@@ -216,29 +186,6 @@ int main(void)
 		return shaderObj;
 	};
 
-	GLuint vertexShaderObj = load_and_compile_shader(GL_VERTEX_SHADER, "vertex.glsl");
-	GLuint fragmentShaderObj = load_and_compile_shader(GL_FRAGMENT_SHADER, "fragment.glsl");
-	if (!vertexShaderObj && !fragmentShaderObj) { std::cout << "Failed to load and compile shaders\n"; return -1; }
-
-	GLuint glProgram = glCreateProgram();
-	{
-		glAttachShader(glProgram, vertexShaderObj);
-		glAttachShader(glProgram, fragmentShaderObj);
-		glLinkProgram(glProgram);
-
-		GLint gl_status = 0;
-		glGetProgramiv(glProgram, GL_LINK_STATUS, &gl_status);
-		if (!gl_status)
-		{
-			char temp[256];
-			glGetProgramInfoLog(glProgram, 256, 0, temp);
-			std::cout << "Failed to link program: " << temp << std::endl;
-			glDeleteProgram(glProgram);
-		}
-		else { std::cout << "Shaders linked successfully\n"; }
-		if (!checkGLError()) { return -1; }
-	}
-
 	GLuint vertexTextureShaderObj = load_and_compile_shader(GL_VERTEX_SHADER, "textureVertexShader.glsl");
 	GLuint fragmentTextureShaderObj = load_and_compile_shader(GL_FRAGMENT_SHADER, "textureFragmentShader.glsl");
 	if (!vertexTextureShaderObj && !fragmentTextureShaderObj) { std::cout << "Failed to load and compile shaders\n"; return -1; }
@@ -262,124 +209,69 @@ int main(void)
 
 		if (!checkGLError()) { return -1; }
 	}
+	glUseProgram(textureShaderProgram);
 
-	//Create buffers (quad for texture):
-	GLuint quadvbo;
-	GLuint quadvao;
+	float vertices[] = {
+		// positions          // colors           // texture coords
+		 0.5f,  0.5f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 1.0f, // top right
+		 0.5f, -0.5f, 0.0f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f, // bottom right
+		-0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f, // bottom left
+		-0.5f,  0.5f, 0.0f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f  // top left 
+	};
+	unsigned int indices[] = {
+		0, 1, 3, // first triangle
+		1, 2, 3  // second triangle
+	};
+	unsigned int VBO, VAO, EBO;
+	glGenVertexArrays(1, &VAO);
+	glGenBuffers(1, &VBO);
+	glGenBuffers(1, &EBO);
 
-	//Create buffer ID
-	glGenBuffers(1, &quadvbo);
-	if (!checkGLError("glGenBuffers")) { return -1; }
+	glBindVertexArray(VAO);
 
-	// Select the GL Buffer as the active one: 
-	glBindBuffer(GL_ARRAY_BUFFER, quadvbo);
-	if (!checkGLError("glBindBuffer")) { return -1; }
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-	// Allocate memory for the buffer:
-	glBufferData(GL_ARRAY_BUFFER, quadVertices.size() * sizeof(float), NULL, GL_STATIC_DRAW);
-	if (!checkGLError("glBufferData")) { return -1; }
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-	// Upload data to the buffer:
-	glBufferSubData(GL_ARRAY_BUFFER, 0, quadVertices.size() * sizeof(float), quadVertices.data());
-	if (!checkGLError("glBufferSubData")) { return -1; }
+	// position attribute
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+	// color attribute
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+	glEnableVertexAttribArray(1);
+	// texture coord attribute
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+	glEnableVertexAttribArray(2);
 
-	// Create and activate the Vertex Array Object
-	// these API functions are missing on windows from the CUDA SDK glew, so we load them manually:
-	typedef void (*Fnt_GenVertexArrays) (GLsizei n, GLuint* arrays);
-	typedef void (*Fnt_BindVertexArray) (GLuint array);
-	Fnt_GenVertexArrays pglGenVertexArrays = load_extension_pointer<Fnt_GenVertexArrays>("glGenVertexArrays");
-	Fnt_BindVertexArray pglBindVertexArray = load_extension_pointer<Fnt_BindVertexArray>("glBindVertexArray");
-
-	pglGenVertexArrays(1, &quadvao); if (!checkGLError("glGenVertexArrays")) { return -1; }
-	pglBindVertexArray(quadvao);	   if (!checkGLError("glBindVertexArray")) { return -1; }
-
-	// Register buffers into the VAO
-	glBindBuffer(GL_ARRAY_BUFFER, quadvbo);
-	if (!checkGLError("glBindBuffer(geo)")) { return -1; }
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-	if (!checkGLError("glVertexAttribPointer(geo)")) { return -1; }
 
 	glEnableVertexAttribArray(0);
 	if (!checkGLError("glEnableVertexAttribArray(0)")) { return -1; }
 
-	//Create buffers (for particle data):
-	GLuint glbuffer;
-	GLuint glvao;
-
-	//Create buffer ID
-	glGenBuffers(1, &glbuffer);
-	if (!checkGLError("glGenBuffers")) { return -1; }
-
-	// Select the GL Buffer as the active one: 
-	glBindBuffer(GL_ARRAY_BUFFER, glbuffer);
-	if (!checkGLError("glBindBuffer")) { return -1; }
-
-	// Allocate memory for the buffer:
-	glBufferData(GL_ARRAY_BUFFER, particles.size() * sizeof(Particle), NULL, GL_STATIC_DRAW);
-	if (!checkGLError("glBufferData")) { return -1; }
-
-	// Upload data to the buffer:
-	glBufferSubData(GL_ARRAY_BUFFER, 0, particles.size() * sizeof(Particle), particles.data());
-	if (!checkGLError("glBufferSubData")) { return -1; }
-
-	pglGenVertexArrays(1, &glvao); if (!checkGLError("glGenVertexArrays")) { return -1; }
-	pglBindVertexArray(glvao);	   if (!checkGLError("glBindVertexArray")) { return -1; }
-
-	// Register buffers into the VAO
-	glBindBuffer(GL_ARRAY_BUFFER, glbuffer);
-	if (!checkGLError("glBindBuffer(geo)")) { return -1; }
-	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(Particle), (GLvoid*)0);
-	if (!checkGLError("glVertexAttribPointer(geo)")) { return -1; }
-
-	glEnableVertexAttribArray(0);
-	if (!checkGLError("glEnableVertexAttribArray(0)")) { return -1; }
-
-	// create framebuffer
-	unsigned int fbo;
-	glGenFramebuffers(1, &fbo);
-
-	// create a color attachment texture
 	unsigned int textureColorbuffer;
 	glGenTextures(1, &textureColorbuffer);
 	glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	// set texture wrapping to GL_REPEAT (default wrapping method)
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	// create a renderbuffer object for depth and stancil attachment, because for now, we won't sample these
-	unsigned int rbo;
-	glGenRenderbuffers(1, &rbo);
-	glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-
-	// attach the texture and renderbuffer
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo); // write operations
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureColorbuffer, 0);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
-
-	// verify if the framebuffer is complete
-	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE)
-	{
-		std::cout << "Framebuffer complete\n";
-	}
-
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-	glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
 	int w, h, nrChannels;
-	unsigned char* data = stbi_load("map.png", &w, &h, &nrChannels, 0);
+	unsigned char* data = stbi_load("map.jpg", &w, &h, &nrChannels, 0);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
 	glGenerateMipmap(GL_TEXTURE_2D);
 	stbi_image_free(data);
+
 	std::cout << "Entering render loop\n";
 	while (!glfwWindowShouldClose(window))
 	{
 		glClearColor(0, 0, 0, 1);
-		glClear(GL_COLOR_BUFFER_BIT);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		glUseProgram(textureShaderProgram);
-		pglBindVertexArray(quadvao);
-		glDrawArrays(GL_TRIANGLES, 0, 6);
+		glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
+		glBindVertexArray(VAO);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
