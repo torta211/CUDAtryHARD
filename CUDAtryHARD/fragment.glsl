@@ -1,16 +1,11 @@
-#version 330
+#version 330 core
+out vec4 FragColor;
 
-// FS locations
-#define FRAG_COLOR	0
-in block
-{
-	vec4 Position;
-	vec3 Color;
-} FS_In;
+in vec2 TexCoords;
 
-layout(location = FRAG_COLOR, index = 0) out vec3 Color;
+uniform sampler2D texture1;
 
 void main()
 {
-	Color = FS_In.Color;
+    FragColor = texture(texture1, TexCoords);
 }
