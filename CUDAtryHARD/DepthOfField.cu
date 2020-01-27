@@ -80,8 +80,8 @@ void processInput(GLFWwindow* window);
 unsigned int loadTexture(const char* path);
 
 // settings
-const unsigned int SCR_WIDTH = 1024 * 3;
-const unsigned int SCR_HEIGHT = 576 * 3;
+const unsigned int SCR_WIDTH = 1024 * 2;
+const unsigned int SCR_HEIGHT = 576 * 2;
 int size_tex_data = sizeof(GLubyte) * SCR_WIDTH * SCR_HEIGHT * 4;
 dim3 block(16, 16, 1);
 dim3 grid(SCR_WIDTH / block.x, SCR_HEIGHT / block.y, 1);
