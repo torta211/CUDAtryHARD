@@ -13,3 +13,12 @@ Visual studio 2019 working setup
 8.) copy glew/bin/x64/glew32.dll to the project folder
 
 DONE
+
+DEMO:
+https://drive.google.com/open?id=1j-BS3pyLDXrW1oK-5qYeqmRM2ZWVsBh9
+
+DEPENDENCIES:
+
+GLFW
+GLAD
+GLM
